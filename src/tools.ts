@@ -10,20 +10,30 @@ type SendResult = {
 
 const baseUrl = (port: number) => `http://127.0.0.1:${port}`
 
+type SessionEntry = {
+  id: string
+  parentID?: string
+}
+
 // find the most recent active session on a remote instance
 const findActiveSession = async (port: number): Promise<string | null> => {
   const result = await safeAsync(async () => {
     const res = await fetch(`${baseUrl(port)}/session?limit=10`)
     if (!res.ok) return null
-    return res.json() as Promise<{ data?: Array<{ id: string }> }>
+    // API returns a raw array of session objects
+    return res.json() as Promise<Array<SessionEntry> | null>
   })
 
   if (result.error) return null
 
-  const sessions = result.data?.data
+  const sessions = result.data
   if (!sessions || sessions.length === 0) return null
 
-  const first = sessions[0]
+  // filter out subagent sessions (those with a parentID)
+  const mainSessions = sessions.filter((s) => !s.parentID)
+  if (mainSessions.length === 0) return null
+
+  const first = mainSessions[0]
   if (!first) return null
 
   return first.id
