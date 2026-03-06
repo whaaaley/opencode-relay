@@ -1,37 +1,38 @@
 {
-  "name": "opencode-chat",
+  "name": "opencode-relay",
   "version": "0.0.1",
-  "description": "OpenCode plugin that provides multi-instance coordination tools for chat and broadcast messaging between OpenCode instances",
+  "description": "OpenCode plugin for relaying messages between multiple AI agent instances",
   "keywords": [
     "opencode",
     "opencode-plugin",
     "plugin",
-    "chat",
+    "relay",
     "multi-agent",
     "coordination",
     "broadcast"
   ],
-  "homepage": "https://github.com/whaaaley/opencode-chat#readme",
+  "homepage": "https://github.com/whaaaley/opencode-relay#readme",
   "bugs": {
-    "url": "https://github.com/whaaaley/opencode-chat/issues"
+    "url": "https://github.com/whaaaley/opencode-relay/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/whaaaley/opencode-chat.git"
+    "url": "git+https://github.com/whaaaley/opencode-relay.git"
   },
   "license": "MIT",
   "author": "Dustin Dowell",
   "type": "module",
   "exports": {
     ".": {
-      "import": "./dist/chat.js",
-      "types": "./dist/chat.d.ts"
+      "import": "./dist/relay.js",
+      "types": "./dist/relay.d.ts"
     }
   },
-  "main": "./dist/chat.js",
-  "types": "./dist/chat.d.ts",
+  "main": "./dist/relay.js",
+  "types": "./dist/relay.d.ts",
   "files": [
     "dist/",
+    "instructions/",
     "README.md",
     "LICENSE"
   ],

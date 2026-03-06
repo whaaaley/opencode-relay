@@ -26,6 +26,6 @@
     "sourceMap": true,
     "types": ["bun"]
   },
-  "include": ["chat.ts", "src/**/*"],
+  "include": ["relay.ts", "src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }

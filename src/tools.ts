@@ -1,16 +1,12 @@
 import { tool } from '@opencode-ai/plugin'
-import type { ChatConfig } from './config.ts'
 import { getRemoteClient } from './client.ts'
+import type { RelayConfig } from './config.ts'
 import { safeAsync } from './safe.ts'
 
 type SendResult = {
   target: string
   success: boolean
   error?: string
-}
-
-type SessionListResponse = {
-  data?: Array<{ id: string }>
 }
 
 // find the most recent active session on a remote instance
@@ -22,7 +18,7 @@ const findActiveSession = async (port: number): Promise<string | null> => {
     return null
   }
 
-  const response = result.data as SessionListResponse
+  const response = result.data
   if (!response.data) {
     return null
   }
@@ -47,7 +43,16 @@ const checkHealth = async (port: number): Promise<boolean> => {
   return !result.error
 }
 
-const sendMessage = async (config: ChatConfig, targetName: string, port: number, message: string): Promise<SendResult> => {
+type SendOptions = {
+  config: RelayConfig
+  targetName: string
+  port: number
+  message: string
+  noReply?: boolean
+}
+
+const sendMessage = async (options: SendOptions): Promise<SendResult> => {
+  const { config, targetName, port, message, noReply } = options
   const healthy = await checkHealth(port)
   if (!healthy) {
     return { target: targetName, success: false, error: `not running (port ${port})` }
@@ -62,6 +67,7 @@ const sendMessage = async (config: ChatConfig, targetName: string, port: number,
   const result = await safeAsync(() => (
     client.session.promptAsync({
       sessionID,
+      noReply,
       parts: [{
         type: 'text',
         text: `[Chat from ${config.self}]: ${message}`,
@@ -76,7 +82,7 @@ const sendMessage = async (config: ChatConfig, targetName: string, port: number,
   return { target: targetName, success: true }
 }
 
-export const createChatTool = (config: ChatConfig) => {
+export const createChatTool = (config: RelayConfig) => {
   const available = Object.keys(config.instances)
     .filter((name) => name !== config.self)
 
@@ -90,6 +96,9 @@ export const createChatTool = (config: ChatConfig) => {
     args: {
       target: tool.schema.string().describe(`Target instance name: ${available.join(', ')}`),
       message: tool.schema.string().describe('The message to send'),
+      silent: tool.schema.boolean().optional().describe(
+        'When true, injects context without triggering a response from the target',
+      ),
     },
     async execute(args) {
       const target = config.instances[args.target]
@@ -101,10 +110,20 @@ export const createChatTool = (config: ChatConfig) => {
         return `Cannot chat with yourself (${config.self})`
       }
 
-      const result = await sendMessage(config, args.target, target.port, args.message)
+      const result = await sendMessage({
+        config,
+        targetName: args.target,
+        port: target.port,
+        message: args.message,
+        noReply: args.silent,
+      })
 
       if (!result.success) {
         return `Failed to send to ${args.target}: ${result.error}`
+      }
+
+      if (args.silent) {
+        return `Context injected into ${args.target} (silent, no reply expected).`
       }
 
       return `Message sent to ${args.target}. They will chat back when done.`
@@ -112,7 +131,67 @@ export const createChatTool = (config: ChatConfig) => {
   })
 }
 
-export const createBroadcastTool = (config: ChatConfig) => {
+export const createPingTool = (config: RelayConfig) => {
+  const allNames = Object.keys(config.instances)
+
+  return tool({
+    description: [
+      'Health check that reports which instances are online or offline with response times.',
+      `Available instances: ${allNames.join(', ')}.`,
+    ].join(' '),
+    args: {},
+    async execute() {
+      const entries = Object.entries(config.instances)
+
+      const results = await Promise.all(
+        entries.map(async ([name, cfg]) => {
+          const start = Date.now()
+          const healthy = await checkHealth(cfg.port)
+          const elapsed = Date.now() - start
+
+          return {
+            name,
+            port: cfg.port,
+            status: healthy ? 'online' : 'offline',
+            ms: healthy ? elapsed : null,
+            self: name === config.self,
+          }
+        }),
+      )
+
+      const lines = results.map((r) => {
+        const selfTag = r.self ? ' (self)' : ''
+        const timing = r.ms !== null ? ` ${r.ms}ms` : ''
+        return `${r.name}: ${r.status}${timing}${selfTag}`
+      })
+
+      const online = results.filter((r) => r.status === 'online').length
+      lines.push(`${online}/${results.length} instances online`)
+
+      return lines.join('\n')
+    },
+  })
+}
+
+// broadcast a silent message to all other instances (used by event hooks)
+export const broadcastSilent = async (config: RelayConfig, message: string): Promise<void> => {
+  const others = Object.entries(config.instances)
+    .filter(([name]) => name !== config.self)
+
+  await Promise.all(
+    others.map(([name, cfg]) =>
+      sendMessage({
+        config,
+        targetName: name,
+        port: cfg.port,
+        message,
+        noReply: true,
+      })
+    ),
+  )
+}
+
+export const createBroadcastTool = (config: RelayConfig) => {
   return tool({
     description: [
       'Broadcast a message to all other running OpenCode instances.',
@@ -131,7 +210,14 @@ export const createBroadcastTool = (config: ChatConfig) => {
       }
 
       const results = await Promise.all(
-        others.map(([name, cfg]) => sendMessage(config, name, cfg.port, args.message)),
+        others.map(([name, cfg]) =>
+          sendMessage({
+            config,
+            targetName: name,
+            port: cfg.port,
+            message: args.message,
+          })
+        ),
       )
 
       const sent = results.filter((r) => r.success).map((r) => r.target)
