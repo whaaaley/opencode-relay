@@ -1,6 +1,6 @@
 import type { Plugin } from '@opencode-ai/plugin'
 import { loadConfig } from './src/config.ts'
-import { broadcastSilent, createBroadcastTool, createChatTool, createConnectTool, createPingTool } from './src/tools.ts'
+import { broadcastEvent, createBroadcastTool, createChatTool, createConnectTool, createPingTool } from './src/tools.ts'
 
 const plugin: Plugin = async ({ directory, serverUrl }) => {
   const config = await loadConfig(directory, serverUrl)
@@ -14,12 +14,12 @@ const plugin: Plugin = async ({ directory, serverUrl }) => {
     },
     async event({ event }) {
       if (event.type === 'session.idle') {
-        await broadcastSilent(config, `${config.self} is now idle and available for tasks.`)
+        await broadcastEvent(config, `${config.self} is now idle and available for tasks.`)
         return
       }
 
       if (event.type === 'session.compacted') {
-        await broadcastSilent(
+        await broadcastEvent(
           config,
           `${config.self} context was compacted. Memory may be degraded - send a re-brief if needed.`,
         )

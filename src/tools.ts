@@ -238,9 +238,10 @@ export const createPingTool = (config: RelayConfig) => {
   })
 }
 
-// broadcast a silent message to all other instances (used by event hooks)
+// broadcast a message to all other instances (used by event hooks)
 // skips targets that aren't connected yet
-export const broadcastSilent = async (config: RelayConfig, message: string): Promise<void> => {
+// sends as normal messages so receiving instances process them properly
+export const broadcastEvent = async (config: RelayConfig, message: string): Promise<void> => {
   const others = Object.entries(config.instances)
     .filter(([name]) => name !== config.self)
     .filter(([name]) => sessionCache.has(name))
@@ -252,7 +253,6 @@ export const broadcastSilent = async (config: RelayConfig, message: string): Pro
         targetName: name,
         port: cfg.port,
         message,
-        noReply: true,
       })
     ),
   )
