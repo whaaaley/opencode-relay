@@ -19,42 +19,38 @@ type SessionEntry = {
   parentID?: string | null
 }
 
+// try fetching sessions from each port until one responds
+// all instances share storage so any port returns the same session list
+const fetchSessions = async (ports: number[]): Promise<{ sessions: SessionEntry[]; port: number } | null> => {
+  for (const port of ports) {
+    const result = await safeAsync(async () => {
+      const res = await fetch(`${baseUrl(port)}/session?limit=10`)
+      if (!res.ok) return null
+      return res.json() as Promise<Array<SessionEntry> | null>
+    })
+    if (!result.error && result.data) {
+      return { sessions: result.data, port }
+    }
+  }
+  return null
+}
+
 // fetch session list and resolve all instance names to session IDs
 const resolveSessions = async (
-  port: number,
+  ports: number[],
   instanceNames: string[],
-): Promise<{ resolved: string[]; missed: string[]; debug: string }> => {
-  const url = `${baseUrl(port)}/session?limit=10`
-  const debugParts: string[] = [`url=${url}`]
-
-  const result = await safeAsync(async () => {
-    const res = await fetch(url)
-    if (!res.ok) {
-      debugParts.push(`status=${res.status}`)
-      return null
-    }
-    // API returns a raw array of session objects
-    return res.json() as Promise<Array<SessionEntry> | null>
-  })
+): Promise<{ resolved: string[]; missed: string[]; source: string }> => {
+  const fetched = await fetchSessions(ports)
 
   const resolved: string[] = []
   const missed: string[] = []
 
-  if (result.error) {
-    debugParts.push(`error=${result.error.message}`)
+  if (!fetched) {
     missed.push(...instanceNames)
-    return { resolved, missed, debug: debugParts.join('; ') }
+    return { resolved, missed, source: `none (tried ports ${ports.join(', ')})` }
   }
 
-  if (!result.data) {
-    debugParts.push('data=null')
-    missed.push(...instanceNames)
-    return { resolved, missed, debug: debugParts.join('; ') }
-  }
-
-  const sessions = result.data
-  const titles = sessions.map((s) => `"${s.title}" (parent=${s.parentID ?? 'none'})`).join(', ')
-  debugParts.push(`sessions=${sessions.length} [${titles}]`)
+  const sessions = fetched.sessions
 
   for (const name of instanceNames) {
     const match = sessions.find((s) =>
@@ -68,7 +64,7 @@ const resolveSessions = async (
     }
   }
 
-  return { resolved, missed, debug: debugParts.join('; ') }
+  return { resolved, missed, source: `port ${fetched.port}` }
 }
 
 const checkHealth = async (port: number): Promise<boolean> => {
@@ -129,6 +125,7 @@ const sendMessage = async (options: SendOptions): Promise<SendResult> => {
 
 export const createConnectTool = (config: RelayConfig) => {
   const allNames = Object.keys(config.instances)
+  const allPorts = Object.values(config.instances).map((cfg) => cfg.port)
 
   return tool({
     description: [
@@ -138,15 +135,12 @@ export const createConnectTool = (config: RelayConfig) => {
     ].join(' '),
     args: {},
     async execute() {
-      const port = config.selfPort
-      const { resolved, missed, debug } = await resolveSessions(port, allNames)
+      const { resolved, missed, source } = await resolveSessions(allPorts, allNames)
 
       const lines: string[] = []
-      lines.push(`Port: ${port}`)
-      if (debug) lines.push(`Debug: ${debug}`)
       if (resolved.length) lines.push(`Connected: ${resolved.join(', ')}`)
       if (missed.length) lines.push(`Not found: ${missed.join(', ')}`)
-      lines.push(`${resolved.length}/${allNames.length} sessions cached`)
+      lines.push(`${resolved.length}/${allNames.length} sessions cached (via ${source})`)
 
       return lines.join('\n')
     },
