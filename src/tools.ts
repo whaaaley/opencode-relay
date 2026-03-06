@@ -253,6 +253,7 @@ export const broadcastEvent = async (config: RelayConfig, message: string): Prom
         targetName: name,
         port: cfg.port,
         message,
+        noReply: true,
       })
     ),
   )
