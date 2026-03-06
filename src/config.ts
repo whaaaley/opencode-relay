@@ -26,9 +26,10 @@ const rawConfigSchema = z.object({
   instances: z.record(z.string(), instanceSchema).optional(),
 })
 
-// resolve self identity from the server URL the plugin receives
+// resolve self identity from OPENCODE_PORT env var, falling back to server URL port
 const resolveSelf = (serverUrl: URL, instances: Record<string, InstanceConfig>): SelfIdentity => {
-  const selfPort = Number(serverUrl.port)
+  const envPort = process.env.OPENCODE_PORT
+  const selfPort = envPort ? Number(envPort) : Number(serverUrl.port)
 
   // find which instance name matches this port
   const entry = Object.entries(instances).find(([, cfg]) => cfg.port === selfPort)
