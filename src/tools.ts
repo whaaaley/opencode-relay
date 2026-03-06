@@ -1,5 +1,4 @@
 import { tool } from '@opencode-ai/plugin'
-import { getRemoteClient } from './client.ts'
 import type { RelayConfig } from './config.ts'
 import { safeAsync } from './safe.ts'
 
@@ -9,38 +8,32 @@ type SendResult = {
   error?: string
 }
 
+const baseUrl = (port: number) => `http://127.0.0.1:${port}`
+
 // find the most recent active session on a remote instance
 const findActiveSession = async (port: number): Promise<string | null> => {
-  const client = getRemoteClient(port)
+  const result = await safeAsync(async () => {
+    const res = await fetch(`${baseUrl(port)}/session?limit=10`)
+    if (!res.ok) return null
+    return res.json() as Promise<{ data?: Array<{ id: string }> }>
+  })
 
-  const result = await safeAsync(() => client.session.list({ limit: 10 }))
-  if (result.error) {
-    return null
-  }
+  if (result.error) return null
 
-  const response = result.data
-  if (!response.data) {
-    return null
-  }
+  const sessions = result.data?.data
+  if (!sessions || sessions.length === 0) return null
 
-  const sessions = response.data
-  if (sessions.length === 0) {
-    return null
-  }
-
-  // return the most recently updated session
   const first = sessions[0]
-  if (!first) {
-    return null
-  }
+  if (!first) return null
 
   return first.id
 }
 
 const checkHealth = async (port: number): Promise<boolean> => {
-  const client = getRemoteClient(port)
-  const result = await safeAsync(() => client.global.health())
-  return !result.error
+  const healthy = await fetch(`${baseUrl(port)}/global/health`)
+    .then((r) => r.ok)
+    .catch(() => false)
+  return healthy
 }
 
 type SendOptions = {
@@ -63,17 +56,26 @@ const sendMessage = async (options: SendOptions): Promise<SendResult> => {
     return { target: targetName, success: false, error: 'no active session found' }
   }
 
-  const client = getRemoteClient(port)
-  const result = await safeAsync(() => (
-    client.session.promptAsync({
-      sessionID,
-      noReply,
-      parts: [{
-        type: 'text',
-        text: `[Chat from ${config.self}]: ${message}`,
-      }],
+  const body: Record<string, unknown> = {
+    parts: [{
+      type: 'text',
+      text: `[Chat from ${config.self}]: ${message}`,
+    }],
+  }
+  if (noReply) {
+    body.noReply = true
+  }
+
+  const result = await safeAsync(async () => {
+    const res = await fetch(`${baseUrl(port)}/session/${sessionID}/prompt_async`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     })
-  ))
+    if (!res.ok) {
+      throw new Error(`${res.status} ${await res.text()}`)
+    }
+  })
 
   if (result.error) {
     return { target: targetName, success: false, error: result.error.message }
