@@ -23,10 +23,16 @@ type SessionEntry = {
 const resolveSessions = async (
   port: number,
   instanceNames: string[],
-): Promise<{ resolved: string[]; missed: string[] }> => {
+): Promise<{ resolved: string[]; missed: string[]; debug: string }> => {
+  const url = `${baseUrl(port)}/session?limit=10`
+  const debugParts: string[] = [`url=${url}`]
+
   const result = await safeAsync(async () => {
-    const res = await fetch(`${baseUrl(port)}/session?limit=10`)
-    if (!res.ok) return null
+    const res = await fetch(url)
+    if (!res.ok) {
+      debugParts.push(`status=${res.status}`)
+      return null
+    }
     // API returns a raw array of session objects
     return res.json() as Promise<Array<SessionEntry> | null>
   })
@@ -34,12 +40,21 @@ const resolveSessions = async (
   const resolved: string[] = []
   const missed: string[] = []
 
-  if (result.error || !result.data) {
+  if (result.error) {
+    debugParts.push(`error=${result.error.message}`)
     missed.push(...instanceNames)
-    return { resolved, missed }
+    return { resolved, missed, debug: debugParts.join('; ') }
+  }
+
+  if (!result.data) {
+    debugParts.push('data=null')
+    missed.push(...instanceNames)
+    return { resolved, missed, debug: debugParts.join('; ') }
   }
 
   const sessions = result.data
+  const titles = sessions.map((s) => `"${s.title}" (parent=${s.parentID ?? 'none'})`).join(', ')
+  debugParts.push(`sessions=${sessions.length} [${titles}]`)
 
   for (const name of instanceNames) {
     const match = sessions.find((s) =>
@@ -53,7 +68,7 @@ const resolveSessions = async (
     }
   }
 
-  return { resolved, missed }
+  return { resolved, missed, debug: debugParts.join('; ') }
 }
 
 const checkHealth = async (port: number): Promise<boolean> => {
@@ -123,9 +138,12 @@ export const createConnectTool = (config: RelayConfig) => {
     ].join(' '),
     args: {},
     async execute() {
-      const { resolved, missed } = await resolveSessions(config.selfPort, allNames)
+      const port = config.selfPort
+      const { resolved, missed, debug } = await resolveSessions(port, allNames)
 
       const lines: string[] = []
+      lines.push(`Port: ${port}`)
+      if (debug) lines.push(`Debug: ${debug}`)
       if (resolved.length) lines.push(`Connected: ${resolved.join(', ')}`)
       if (missed.length) lines.push(`Not found: ${missed.join(', ')}`)
       lines.push(`${resolved.length}/${allNames.length} sessions cached`)
