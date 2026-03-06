@@ -29,9 +29,21 @@ By default, the plugin expects three instances on ports 4000, 4001, and 4002 nam
 }
 ```
 
-Each instance resolves its own identity by matching the OpenCode server port against the configured instance ports.
+Each instance resolves its own identity by reading the `OPENCODE_PORT` environment variable and matching it against the configured instance ports. Set this when launching each instance:
+
+```bash
+OPENCODE_PORT=4000 opencode --port 4000
+OPENCODE_PORT=4001 opencode --port 4001
+OPENCODE_PORT=4002 opencode --port 4002
+```
 
 ## Tools
+
+### relay-connect
+
+Resolve session IDs for all configured instances and cache them in memory. Must be called before `relay-chat` or `relay-broadcast`. Sessions are matched by title (e.g., a session titled "Alpha" maps to the `alpha` instance).
+
+No parameters required. Tries each configured instance port until one responds, then resolves all session IDs from the shared session list.
 
 ### relay-chat
 
@@ -72,11 +84,9 @@ The plugin ships a coordination protocol in `instructions/instructions.md` that 
 
 ## How it works
 
-The plugin uses the OpenCode SDK to communicate between instances over HTTP. When sending a message, it:
-
-1. Checks the target instance is healthy via the health endpoint
-2. Finds the most recent active session on the target instance
-3. Sends the message as a prompt to that session
+1. **Connect** - `relay-connect` fetches the session list from any reachable instance port (all instances share storage) and matches session titles to instance names
+2. **Send** - `relay-chat` and `relay-broadcast` check target health, then POST to `/session/{id}/prompt_async` on the target's port
+3. **Identity** - Each instance identifies itself via the `OPENCODE_PORT` env var matched against configured instance ports
 
 Messages are prefixed with the sender's instance name so the receiver knows who sent it. The receiver processes the message and can use its own relay-chat tool to respond.
 
