@@ -1,6 +1,6 @@
 {
   "name": "opencode-relay",
-  "version": "0.0.250956",
+  "version": "0.0.2",
   "description": "OpenCode plugin for relaying messages between multiple AI agent instances",
   "keywords": [
     "opencode",
