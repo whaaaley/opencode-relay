@@ -10,13 +10,20 @@ type SendResult = {
 
 const baseUrl = (port: number) => `http://127.0.0.1:${port}`
 
+// module-level session cache: instance name -> session ID
+const sessionCache = new Map<string, string>()
+
 type SessionEntry = {
   id: string
-  parentID?: string
+  title?: string
+  parentID?: string | null
 }
 
-// find the most recent active session on a remote instance
-const findActiveSession = async (port: number): Promise<string | null> => {
+// fetch session list and resolve all instance names to session IDs
+const resolveSessions = async (
+  port: number,
+  instanceNames: string[],
+): Promise<{ resolved: string[]; missed: string[] }> => {
   const result = await safeAsync(async () => {
     const res = await fetch(`${baseUrl(port)}/session?limit=10`)
     if (!res.ok) return null
@@ -24,19 +31,29 @@ const findActiveSession = async (port: number): Promise<string | null> => {
     return res.json() as Promise<Array<SessionEntry> | null>
   })
 
-  if (result.error) return null
+  const resolved: string[] = []
+  const missed: string[] = []
+
+  if (result.error || !result.data) {
+    missed.push(...instanceNames)
+    return { resolved, missed }
+  }
 
   const sessions = result.data
-  if (!sessions || sessions.length === 0) return null
 
-  // filter out subagent sessions (those with a parentID)
-  const mainSessions = sessions.filter((s) => !s.parentID)
-  if (mainSessions.length === 0) return null
+  for (const name of instanceNames) {
+    const match = sessions.find((s) =>
+      !s.parentID && s.title?.toLowerCase() === name.toLowerCase()
+    )
+    if (match) {
+      sessionCache.set(name, match.id)
+      resolved.push(name)
+    } else {
+      missed.push(name)
+    }
+  }
 
-  const first = mainSessions[0]
-  if (!first) return null
-
-  return first.id
+  return { resolved, missed }
 }
 
 const checkHealth = async (port: number): Promise<boolean> => {
@@ -56,14 +73,15 @@ type SendOptions = {
 
 const sendMessage = async (options: SendOptions): Promise<SendResult> => {
   const { config, targetName, port, message, noReply } = options
+
+  const sessionID = sessionCache.get(targetName)
+  if (!sessionID) {
+    return { target: targetName, success: false, error: 'not connected (run relay-connect first)' }
+  }
+
   const healthy = await checkHealth(port)
   if (!healthy) {
     return { target: targetName, success: false, error: `not running (port ${port})` }
-  }
-
-  const sessionID = await findActiveSession(port)
-  if (!sessionID) {
-    return { target: targetName, success: false, error: 'no active session found' }
   }
 
   const body: Record<string, unknown> = {
@@ -92,6 +110,29 @@ const sendMessage = async (options: SendOptions): Promise<SendResult> => {
   }
 
   return { target: targetName, success: true }
+}
+
+export const createConnectTool = (config: RelayConfig) => {
+  const allNames = Object.keys(config.instances)
+
+  return tool({
+    description: [
+      'Resolve session IDs for all configured instances and cache them in memory.',
+      'Must be called before relay-chat or relay-broadcast.',
+      `Instances: ${allNames.join(', ')}.`,
+    ].join(' '),
+    args: {},
+    async execute() {
+      const { resolved, missed } = await resolveSessions(config.selfPort, allNames)
+
+      const lines: string[] = []
+      if (resolved.length) lines.push(`Connected: ${resolved.join(', ')}`)
+      if (missed.length) lines.push(`Not found: ${missed.join(', ')}`)
+      lines.push(`${resolved.length}/${allNames.length} sessions cached`)
+
+      return lines.join('\n')
+    },
+  })
 }
 
 export const createChatTool = (config: RelayConfig) => {
@@ -186,9 +227,11 @@ export const createPingTool = (config: RelayConfig) => {
 }
 
 // broadcast a silent message to all other instances (used by event hooks)
+// skips targets that aren't connected yet
 export const broadcastSilent = async (config: RelayConfig, message: string): Promise<void> => {
   const others = Object.entries(config.instances)
     .filter(([name]) => name !== config.self)
+    .filter(([name]) => sessionCache.has(name))
 
   await Promise.all(
     others.map(([name, cfg]) =>
@@ -235,7 +278,7 @@ export const createBroadcastTool = (config: RelayConfig) => {
       const sent = results.filter((r) => r.success).map((r) => r.target)
       const failed = results.filter((r) => !r.success).map((r) => `${r.target}: ${r.error}`)
 
-      const lines = []
+      const lines: string[] = []
       if (sent.length) lines.push(`Sent to: ${sent.join(', ')}`)
       if (failed.length) lines.push(`Failed: ${failed.join('; ')}`)
 
